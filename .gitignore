@@ -1,0 +1,18 @@
+# Ignore sensitive configuration and local data
+config/config.php
+db.sqlite
+logs/
+*.log
+
+# Ignore system files
+*.swp
+*.bak
+*.tmp
+
+# Node, build or editor junk
+node_modules/
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+

@@ -1,0 +1,17 @@
+AuthType Basic
+AuthName "RI Booking"
+AuthUserFile /var/www/html/ri-booking/.htpasswd
+Require valid-user
+
+# Hide from indexing and keep quiet
+Header set X-Robots-Tag "noindex, nofollow, noarchive"
+<FilesMatch "\.(sqlite|sql|php~|bak|env|ini)$">
+  Require all denied
+</FilesMatch>
+
+# Security headers (tight but not disruptive)
+Header always set X-Content-Type-Options "nosniff"
+Header always set X-Frame-Options "SAMEORIGIN"
+Header always set Referrer-Policy "no-referrer-when-downgrade"
+Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+

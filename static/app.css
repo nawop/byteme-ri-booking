@@ -1,0 +1,163 @@
+:root{
+  --bg:#0b0f1a;
+  --panel:#11182a;
+  --accent:#8a5cff;   /* neon violet */
+  --accent2:#27e1f7;  /* neon cyan  */
+  --text:#e6e8ef;
+  --muted:#9aa4b2;
+  --ok:#2ecc71;
+  --warn:#f39c12;
+  --danger:#e74c3c;
+}
+
+*{box-sizing:border-box}
+
+/* make the background a single, fixed gradient independent of content size */
+html, body { height:100%; }
+
+body{
+  margin:0;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+
+  /* fullscreen, fixed, no-repeat gradient */
+  background:
+    radial-gradient(1200px 800px at 80% -10%, #1b1040 0%, rgba(27,16,64,0.6) 60%, rgba(10,13,27,1) 100%);
+  background-color: var(--bg);   /* fallback */
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  background-size: cover;
+
+  color:var(--text);
+}
+
+.topbar{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:14px 18px; border-bottom:1px solid #20263a; background:linear-gradient(180deg,#0f1430 0,#0b0f1a 100%);
+}
+.brand{ font-weight:800; letter-spacing:0.5px; font-size:18px; color:var(--accent2) }
+.tagline{ color:var(--muted); font-size:14px }
+.container{ max-width:980px; margin:24px auto; padding:0 16px }
+
+.card{ background:rgba(17,24,42,0.75); border:1px solid #222b44; border-radius:14px; box-shadow:0 10px 30px rgba(0,0,0,0.3); padding:10px }
+.activity-row{
+  display:grid; grid-template-columns: 80px 1fr 110px 120px 130px 40px;
+  gap:12px; align-items:center; padding:12px; border-bottom:1px solid #1e2740;
+}
+.activity-row:hover{ background:rgba(138,92,255,0.08) }
+.h{ font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em }
+.v{ font-size:15px }
+
+/* --- Cycle tags --- */
+.cycles{
+  display:flex;
+  flex-wrap:wrap;            /* prevents overlap when wrapping */
+  gap:6px;                   /* both row and column spacing */
+  align-items:center;
+  min-height:28px;           /* keeps row height steady even with one tag */
+}
+.badge{
+  padding:3px 8px;
+  border:1px solid #2a3354;
+  border-radius:999px;
+  color:var(--accent2);
+  font-weight:600;
+  font-size:12px;
+  line-height:1;             /* tighter look */
+  display:inline-flex; align-items:center; justify-content:center;
+  background:rgba(255,255,255,0.03);
+}
+
+/* Distinct colors per cycle */
+.badge.C1{ border-color:#ff6f91; color:#ff9fbd; background:rgba(255,111,145,0.10); }
+.badge.C2{ border-color:#ffce54; color:#ffe08a; background:rgba(255,206,84,0.10); }
+.badge.C3{ border-color:#27e1f7; color:#7ae9f9; background:rgba(39,225,247,0.10); }
+.badge.C4{ border-color:#8a5cff; color:#c3adff; background:rgba(138,92,255,0.12); }
+
+.toggle{
+  width:28px; height:28px; border:1px solid #2a3354; border-radius:8px;
+  display:flex; align-items:center; justify-content:center; cursor:pointer; user-select:none;
+}
+.toggle:after{ content:'▾'; color:var(--accent) }
+/* Flip arrow when expanded */
+.activity-row.open .toggle:after {
+  content: '▴';  /* up arrow */
+  color: var(--accent2);
+}
+.details{ display:none; padding:12px 16px 18px 16px; background:#0e1425 }
+.details.open{ display:block }
+
+.summary{ color:var(--muted); margin:6px 0 10px 0; line-height:1.5 }
+.dates{ display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 14px 0 }
+.dateopt{
+  display:flex; align-items:center; gap:6px; padding:6px 10px; border:1px solid #2a3354; border-radius:8px; cursor:pointer;
+}
+.dateopt.pending{ opacity:0.5 }
+.actions{ display:flex; gap:10px; align-items:center }
+button{
+  padding:10px 14px; border-radius:10px; border:1px solid #2b3760; background:#141c33; color:var(--text);
+  font-weight:600; cursor:pointer; transition:transform .05s ease;
+}
+button:disabled{ opacity:.5; cursor:not-allowed }
+button.primary{ border-color:var(--accent); box-shadow:0 0 12px rgba(138,92,255,.25) inset }
+button.primary:enabled:hover{ transform:translateY(-1px) }
+input[type="text"], input[type="email"], select{
+  background:#0e1425; border:1px solid #2a3354; color:var(--text);
+  padding:10px 12px; border-radius:10px; width:100%;
+}
+label{ font-size:12px; color:var(--muted) }
+.hr{ height:1px; background:#1e2740; margin:10px 0 }
+
+/* make the expanded panel span the full row width */
+.activity-row .details{
+  grid-column: 1 / -1;
+  display: none;
+  padding: 16px;
+  background:#0e1425;
+  border-top:1px solid #1e2740;
+  border-radius: 0 0 12px 12px;
+}
+.activity-row .details.open{ display:block }
+
+/* Layout inside the details so it doesn't stack awkwardly */
+.details .summary{ margin: 4px 0 10px 0; max-width: 65ch; color: var(--muted); }
+.details .dates{ display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.details .dateopt{ align-items:center; }
+.details .dateopt input{ margin-right:6px; }
+
+/* Form grid stays tidy on wider screens; wraps on small */
+.form-grid{
+  display:grid;
+  grid-template-columns: 1.2fr 0.8fr 1.2fr;
+  gap:10px;
+}
+@media (max-width: 700px){
+  .form-grid{ grid-template-columns: 1fr; }
+}
+
+/* prevent inputs from overflowing their grid cells */
+.form-grid > * { min-width: 0; }
+
+/* actions row: allow wrapping + spacing */
+.actions{
+  display:flex;
+  flex-wrap: wrap;          /* <-- key */
+  gap:12px;
+  align-items:center;
+  margin-top:10px;
+}
+
+/* sensible button sizing so they don't collapse */
+.actions button{
+  flex: 0 0 auto;
+  min-width: 180px;
+  height: 42px;
+}
+
+/* responsive form columns */
+@media (max-width: 980px){
+  .form-grid{ grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 640px){
+  .form-grid{ grid-template-columns: 1fr; }
+  .actions button{ width:100%; }  /* stack buttons full-width on narrow screens */
+}
