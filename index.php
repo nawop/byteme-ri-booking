@@ -24,7 +24,6 @@ if (!empty($cfg['pg']['dsn'])) {
     ]);
 }
 
-
 function json_out($data, int $code=200) {
   http_response_code($code);
   header('Content-Type: application/json; charset=utf-8');
@@ -73,6 +72,45 @@ function callmebot_notify(?array $cmcfg, string $text): void {
   $k = urlencode($apikey);
   $url = "https://api.callmebot.com/whatsapp.php?phone={$p}&text={$t}&apikey={$k}";
   @file_get_contents($url);
+}
+
+/**
+ * Admin auth helper.
+ * - For POST: reads JSON body, extracts admin_secret, returns remaining fields.
+ * - For GET: expects ?admin_secret=...
+ */
+function require_admin_secret(array $cfg, ?array $body = null): array {
+  $expected = $cfg['admin_secret'] ?? '';
+  $provided = null;
+  $data = [];
+
+  if ($body !== null) {
+    $data = $body;
+  } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $raw = file_get_contents('php://input');
+    if ($raw !== '') {
+      $tmp = json_decode($raw, true);
+      if (is_array($tmp)) {
+        $data = $tmp;
+      }
+    }
+  }
+
+  if (isset($data['admin_secret']) && $data['admin_secret'] !== '') {
+    $provided = $data['admin_secret'];
+    unset($data['admin_secret']); // don’t leak it further
+  }
+
+  // For GET-style admin APIs, allow ?admin_secret=...
+  if ($provided === null && isset($_GET['admin_secret'])) {
+    $provided = $_GET['admin_secret'];
+  }
+
+  if ($expected === '' || $provided === null || $provided !== $expected) {
+    json_out(['ok'=>false,'error'=>'Unauthorized'], 401);
+  }
+
+  return $data;
 }
 
 $api = $_GET['api'] ?? null;
@@ -212,41 +250,45 @@ if ($api) {
     }
   }
 
-  /* ===========================================================
-     ADMIN AUTH GATE (for admin-only endpoints)
-  =========================================================== */
-  $adminOnly = ['admin_state','activity_update','approve','reject'];
-  if (in_array($api, $adminOnly, true)) {
-    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-    $token = null;
-    if ($authHeader && stripos($authHeader, 'Bearer ') === 0) { $token = substr($authHeader, 7); }
-    if ($token === null) { $token = $_SERVER['HTTP_X_ADMIN_SECRET'] ?? null; }
-    if ($token === null) { $token = $_GET['secret'] ?? null; } // convenient for local tests
-    if ($token !== ($cfg['admin_secret'] ?? '')) {
-      json_out(['ok'=>false,'error'=>'Unauthorized'], 401);
-    }
-  }
-
   /* =======================
-     ADMIN: lists
+     ADMIN: lists (activities, RIs, etc.)
   ========================*/
 
   // list activities (basic)
   if ($api === 'admin_activities') {
+    require_admin_secret($cfg);
+
     $rows = $db->query("SELECT a.*, r.name AS ri_name
                         FROM activity a JOIN ri r ON r.id=a.ri_id
                         ORDER BY a.id DESC")->fetchAll();
     json_out($rows);
   }
 
-  // list all RIs (for selects)
+  // list all RIs (id + name) – useful for selects
   if ($api === 'admin_ris') {
+    require_admin_secret($cfg);
+
     $rows = $db->query("SELECT id, name FROM ri ORDER BY name")->fetchAll();
+    json_out($rows);
+  }
+
+  // NEW: full RI list for RI management tab
+  if ($api === 'admin_ri_list') {
+    require_admin_secret($cfg);
+
+    $rows = $db->query("
+      SELECT id, name, quota_hours_trimester, quota_hours_year
+      FROM ri
+      ORDER BY name
+    ")->fetchAll();
+
     json_out($rows);
   }
 
   // get one activity
   if ($api === 'admin_activity_get') {
+    require_admin_secret($cfg);
+
     $id = (int)($_GET['id'] ?? 0);
     $st = $db->prepare("SELECT * FROM activity WHERE id=?");
     $st->execute([$id]);
@@ -259,7 +301,8 @@ if ($api) {
      ADMIN: activity save/delete
   ========================*/
   if ($api === 'admin_activity_save' && $_SERVER['REQUEST_METHOD']==='POST') {
-    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $in = require_admin_secret($cfg);
+
     $id = (int)($in['id'] ?? 0);
     $fields = [
       'ri_id' => (int)($in['ri_id'] ?? 0),
@@ -288,7 +331,7 @@ if ($api) {
   }
 
   if ($api === 'admin_activity_delete' && $_SERVER['REQUEST_METHOD']==='POST') {
-    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $in = require_admin_secret($cfg);
     $id = (int)($in['id'] ?? 0);
     $st = $db->prepare("DELETE FROM activity WHERE id=?");
     $st->execute([$id]);
@@ -296,9 +339,67 @@ if ($api) {
   }
 
   /* =======================
+     ADMIN: RI save/delete
+  ========================*/
+  if ($api === 'admin_ri_save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $in = require_admin_secret($cfg);
+
+    $id   = isset($in['id']) ? (int)$in['id'] : 0;
+    $name = trim($in['name'] ?? '');
+    $qh_t = (int)($in['quota_hours_trimester'] ?? 0);
+    $qh_y = (int)($in['quota_hours_year'] ?? 0);
+
+    if ($name === '') {
+      json_out(['ok'=>false,'error'=>'name required'], 400);
+    }
+
+    if ($id > 0) {
+      $stmt = $db->prepare("
+        UPDATE ri
+        SET name = ?, quota_hours_trimester = ?, quota_hours_year = ?
+        WHERE id = ?
+      ");
+      $stmt->execute([$name, $qh_t, $qh_y, $id]);
+    } else {
+      $stmt = $db->prepare("
+        INSERT INTO ri (name, quota_hours_trimester, quota_hours_year)
+        VALUES (?,?,?)
+      ");
+      $stmt->execute([$name, $qh_t, $qh_y]);
+      $id = (int)$db->lastInsertId();
+    }
+
+    $stmt = $db->prepare("
+      SELECT id, name, quota_hours_trimester, quota_hours_year
+      FROM ri
+      WHERE id = ?
+    ");
+    $stmt->execute([$id]);
+    $ri = $stmt->fetch();
+
+    json_out(['ok'=>true, 'ri'=>$ri]);
+  }
+
+  if ($api === 'admin_ri_delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $in = require_admin_secret($cfg);
+    $id = (int)($in['id'] ?? 0);
+
+    if ($id <= 0) {
+      json_out(['ok'=>false,'error'=>'invalid id'],400);
+    }
+
+    $stmt = $db->prepare("DELETE FROM ri WHERE id = ?");
+    $stmt->execute([$id]);
+
+    json_out(['ok'=>true]);
+  }
+
+  /* =======================
      ADMIN: slots CRUD
   ========================*/
   if ($api === 'admin_slots') {
+    require_admin_secret($cfg);
+
     $aid = (int)($_GET['activity_id'] ?? 0);
     $st = $db->prepare("SELECT id, starts_at, ends_at, status FROM slot WHERE activity_id=? ORDER BY starts_at");
     $st->execute([$aid]);
@@ -306,7 +407,8 @@ if ($api) {
   }
 
   if ($api === 'admin_slot_save' && $_SERVER['REQUEST_METHOD']==='POST') {
-    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $in = require_admin_secret($cfg);
+
     $id  = (int)($in['id'] ?? 0);
     if ($id) {
       $st = $db->prepare("UPDATE slot SET starts_at=?, ends_at=? WHERE id=?");
@@ -316,8 +418,10 @@ if ($api) {
       // creating requires activity_id
       $aid = (int)($in['activity_id'] ?? 0);
       // infer ri_id from the activity
-      $ri = $db->prepare("SELECT ri_id FROM activity WHERE id=?"); $ri->execute([$aid]);
-      $row = $ri->fetch(); if(!$row) json_out(['ok'=>false,'error'=>'Activity not found'],404);
+      $ri = $db->prepare("SELECT ri_id FROM activity WHERE id=?"); 
+      $ri->execute([$aid]);
+      $row = $ri->fetch(); 
+      if(!$row) json_out(['ok'=>false,'error'=>'Activity not found'],404);
       $st = $db->prepare("INSERT INTO slot (activity_id, ri_id, starts_at, ends_at, status) VALUES (?,?,?,?, 'OPEN')");
       $st->execute([$aid, (int)$row['ri_id'], $in['starts_at'], $in['ends_at']]);
       json_out(['ok'=>true,'id'=>(int)$db->lastInsertId()]);
@@ -325,7 +429,7 @@ if ($api) {
   }
 
   if ($api === 'admin_slot_delete' && $_SERVER['REQUEST_METHOD']==='POST') {
-    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $in = require_admin_secret($cfg);
     $id = (int)($in['id'] ?? 0);
     $st = $db->prepare("DELETE FROM slot WHERE id=?");
     $st->execute([$id]);
@@ -336,6 +440,8 @@ if ($api) {
      ADMIN: quotas view/update
   ========================*/
   if ($api === 'admin_quotas') {
+    require_admin_secret($cfg);
+
     [$trimesterKey, $yearKey] = current_period_keys($cfg);
     $rows = $db->query("
       SELECT r.id, r.name, r.quota_hours_trimester, r.quota_hours_year,
@@ -354,7 +460,8 @@ if ($api) {
   }
 
   if ($api === 'admin_quotas_update' && $_SERVER['REQUEST_METHOD']==='POST') {
-    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $in = require_admin_secret($cfg);
+
     $st = $db->prepare("UPDATE ri SET quota_hours_trimester=?, quota_hours_year=? WHERE id=?");
     $st->execute([ (float)$in['quota_hours_trimester'], (float)$in['quota_hours_year'], (int)$in['ri_id'] ]);
     json_out(['ok'=>true]);
@@ -364,6 +471,8 @@ if ($api) {
      ADMIN: bookings by status
   ========================*/
   if ($api === 'admin_bookings') {
+    require_admin_secret($cfg);
+
     $status = $_GET['status'] ?? 'PENDING';
     $st = $db->prepare("
       SELECT b.*, s.starts_at, s.ends_at, a.name AS activity_name, r.name AS ri_name
@@ -378,12 +487,12 @@ if ($api) {
     json_out($st->fetchAll());
   }
 
-
-
   /* ===========================================================
      ADMIN: STATE (pending bookings + activities list)
   =========================================================== */
   if ($api === 'admin_state') {
+    require_admin_secret($cfg);
+
     $pending = $db->query("
       SELECT b.id, b.created_at, b.teacher_name, b.teacher_email, b.teacher_cycle,
              a.name AS activity_name, r.name AS ri_name, s.starts_at
@@ -410,7 +519,8 @@ if ($api) {
      ADMIN: ACTIVITY UPDATE (inline editing)
   =========================================================== */
   if ($api === 'activity_update' && $_SERVER['REQUEST_METHOD']==='POST') {
-    $in = json_decode(file_get_contents('php://input'), true);
+    $in = require_admin_secret($cfg);
+
     $id = (int)($in['id'] ?? 0);
     if ($id<=0) json_out(['ok'=>false,'error'=>'Missing id'],400);
 
@@ -430,7 +540,7 @@ if ($api) {
      ADMIN: APPROVE BOOKING (CONFIRMED)
   =========================================================== */
   if ($api === 'approve' && $_SERVER['REQUEST_METHOD']==='POST') {
-    $in = json_decode(file_get_contents('php://input'), true);
+    $in = require_admin_secret($cfg);
     $bid = (int)($in['booking_id'] ?? 0);
 
     $db->beginTransaction();
@@ -470,7 +580,7 @@ if ($api) {
      ADMIN: REJECT BOOKING (release)
   =========================================================== */
   if ($api === 'reject' && $_SERVER['REQUEST_METHOD']==='POST') {
-    $in = json_decode(file_get_contents('php://input'), true);
+    $in = require_admin_secret($cfg);
     $bid = (int)($in['booking_id'] ?? 0);
 
     $db->beginTransaction();
