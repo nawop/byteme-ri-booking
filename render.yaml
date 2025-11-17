@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: ri-booking
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: frankfurt
+    autoDeploy: true
+    envVars:
+      - key: DB_PATH
+        value: /data/db.sqlite
+      - key: ADMIN_SECRET
+        sync: false   # set in dashboard
+      - key: CALLMEBOT_PHONE
+        sync: false
+      - key: CALLMEBOT_KEY
+        sync: false
+    disks:
+      - name: dbdisk
+        mountPath: /data
+        sizeGB: 1
+    healthCheckPath: /

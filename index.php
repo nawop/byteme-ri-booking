@@ -211,6 +211,159 @@ if ($api) {
     }
   }
 
+  /* =======================
+     ADMIN: lists
+  ========================*/
+
+  // list activities (basic)
+  if ($api === 'admin_activities') {
+    $rows = $db->query("SELECT a.*, r.name AS ri_name
+                        FROM activity a JOIN ri r ON r.id=a.ri_id
+                        ORDER BY a.id DESC")->fetchAll();
+    json_out($rows);
+  }
+
+  // list all RIs (for selects)
+  if ($api === 'admin_ris') {
+    $rows = $db->query("SELECT id, name FROM ri ORDER BY name")->fetchAll();
+    json_out($rows);
+  }
+
+  // get one activity
+  if ($api === 'admin_activity_get') {
+    $id = (int)($_GET['id'] ?? 0);
+    $st = $db->prepare("SELECT * FROM activity WHERE id=?");
+    $st->execute([$id]);
+    $row = $st->fetch();
+    if (!$row) json_out(['ok'=>false,'error'=>'Not found'],404);
+    json_out($row);
+  }
+
+  /* =======================
+     ADMIN: activity save/delete
+  ========================*/
+  if ($api === 'admin_activity_save' && $_SERVER['REQUEST_METHOD']==='POST') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $id = (int)($in['id'] ?? 0);
+    $fields = [
+      'ri_id' => (int)($in['ri_id'] ?? 0),
+      'cycle' => trim($in['cycle'] ?? ''),
+      'name'  => trim($in['name'] ?? ''),
+      'duration_hours' => (float)($in['duration_hours'] ?? 1),
+      'group_size'     => (int)($in['group_size'] ?? 25),
+      'is_published'   => (int)($in['is_published'] ?? 1),
+      'summary'        => trim($in['summary'] ?? '')
+    ];
+
+    if ($id) {
+      $sql="UPDATE activity SET ri_id=:ri_id, cycle=:cycle, name=:name,
+           duration_hours=:duration_hours, group_size=:group_size,
+           is_published=:is_published, summary=:summary WHERE id=:id";
+      $st=$db->prepare($sql);
+      $st->execute($fields+['id'=>$id]);
+      json_out(['ok'=>true,'id'=>$id]);
+    } else {
+      $sql="INSERT INTO activity (ri_id,cycle,name,duration_hours,group_size,is_published,summary)
+            VALUES (:ri_id,:cycle,:name,:duration_hours,:group_size,:is_published,:summary)";
+      $st=$db->prepare($sql);
+      $st->execute($fields);
+      json_out(['ok'=>true,'id'=>(int)$db->lastInsertId()]);
+    }
+  }
+
+  if ($api === 'admin_activity_delete' && $_SERVER['REQUEST_METHOD']==='POST') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $id = (int)($in['id'] ?? 0);
+    $st = $db->prepare("DELETE FROM activity WHERE id=?");
+    $st->execute([$id]);
+    json_out(['ok'=>true]);
+  }
+
+  /* =======================
+     ADMIN: slots CRUD
+  ========================*/
+  if ($api === 'admin_slots') {
+    $aid = (int)($_GET['activity_id'] ?? 0);
+    $st = $db->prepare("SELECT id, starts_at, ends_at, status FROM slot WHERE activity_id=? ORDER BY starts_at");
+    $st->execute([$aid]);
+    json_out($st->fetchAll());
+  }
+
+  if ($api === 'admin_slot_save' && $_SERVER['REQUEST_METHOD']==='POST') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $id  = (int)($in['id'] ?? 0);
+    if ($id) {
+      $st = $db->prepare("UPDATE slot SET starts_at=?, ends_at=? WHERE id=?");
+      $st->execute([ $in['starts_at'], $in['ends_at'], $id ]);
+      json_out(['ok'=>true,'id'=>$id]);
+    } else {
+      // creating requires activity_id
+      $aid = (int)($in['activity_id'] ?? 0);
+      // infer ri_id from the activity
+      $ri = $db->prepare("SELECT ri_id FROM activity WHERE id=?"); $ri->execute([$aid]);
+      $row = $ri->fetch(); if(!$row) json_out(['ok'=>false,'error'=>'Activity not found'],404);
+      $st = $db->prepare("INSERT INTO slot (activity_id, ri_id, starts_at, ends_at, status) VALUES (?,?,?,?, 'OPEN')");
+      $st->execute([$aid, (int)$row['ri_id'], $in['starts_at'], $in['ends_at']]);
+      json_out(['ok'=>true,'id'=>(int)$db->lastInsertId()]);
+    }
+  }
+
+  if ($api === 'admin_slot_delete' && $_SERVER['REQUEST_METHOD']==='POST') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $id = (int)($in['id'] ?? 0);
+    $st = $db->prepare("DELETE FROM slot WHERE id=?");
+    $st->execute([$id]);
+    json_out(['ok'=>true]);
+  }
+
+  /* =======================
+     ADMIN: quotas view/update
+  ========================*/
+  if ($api === 'admin_quotas') {
+    [$trimesterKey, $yearKey] = current_period_keys($cfg);
+    $rows = $db->query("
+      SELECT r.id, r.name, r.quota_hours_trimester, r.quota_hours_year,
+        COALESCE( (SELECT SUM(hours) FROM quota_ledger q
+                   WHERE q.ri_id=r.id AND q.period_key='{$trimesterKey}'
+                         AND q.direction='CONSUME'), 0 ) AS consumed_trimester,
+        COALESCE( (SELECT SUM(hours) FROM quota_ledger q
+                   WHERE q.ri_id=r.id AND q.period_key='{$yearKey}'
+                         AND q.direction='CONSUME'), 0 ) AS consumed_year
+      FROM ri r ORDER BY r.name
+    ")->fetchAll();
+    foreach ($rows as &$x) {
+      $x['remaining_trimester'] = max(0, (float)$x['quota_hours_trimester'] - (float)$x['consumed_trimester']);
+    }
+    json_out($rows);
+  }
+
+  if ($api === 'admin_quotas_update' && $_SERVER['REQUEST_METHOD']==='POST') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $st = $db->prepare("UPDATE ri SET quota_hours_trimester=?, quota_hours_year=? WHERE id=?");
+    $st->execute([ (float)$in['quota_hours_trimester'], (float)$in['quota_hours_year'], (int)$in['ri_id'] ]);
+    json_out(['ok'=>true]);
+  }
+
+  /* =======================
+     ADMIN: bookings by status
+  ========================*/
+  if ($api === 'admin_bookings') {
+    $status = $_GET['status'] ?? 'PENDING';
+    $st = $db->prepare("
+      SELECT b.*, s.starts_at, s.ends_at, a.name AS activity_name, r.name AS ri_name
+      FROM booking b
+      JOIN slot s ON s.id=b.slot_id
+      JOIN activity a ON a.id=s.activity_id
+      JOIN ri r ON r.id=s.ri_id
+      WHERE b.status=?
+      ORDER BY s.starts_at ASC
+    ");
+    $st->execute([$status]);
+    json_out($st->fetchAll());
+  }
+
+
+
   /* ===========================================================
      ADMIN: STATE (pending bookings + activities list)
   =========================================================== */

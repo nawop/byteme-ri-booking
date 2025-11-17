@@ -1,5 +1,4 @@
 # Ignore sensitive configuration and local data
-config/config.php
 db.sqlite
 logs/
 *.log
