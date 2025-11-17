@@ -1,4 +1,4 @@
-const BASE = (location.pathname.endsWith('/') ? location.pathname : location.pathname.replace(/\/[^/]+$/, '/'));
+const BASE = new URL('./', window.location.href).pathname;
 
 // --- Secret persistence ---
 const secretInput = document.getElementById('adminSecret');
