@@ -4,10 +4,26 @@ declare(strict_types=1);
 header_remove("X-Powered-By");
 
 $cfg = require __DIR__.'/config/config.php';
-$db  = new PDO('sqlite:'.__DIR__.'/db.sqlite', '', '', [
-  PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-  PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-]);
+
+if (!empty($cfg['pg']['dsn'])) {
+    // Render / Postgres
+    $db = new PDO(
+        $cfg['pg']['dsn'],
+        $cfg['pg']['user'],
+        $cfg['pg']['pass'],
+        [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ]
+    );
+} else {
+    // Local dev fallback: sqlite
+    $db = new PDO('sqlite:'.$cfg['db_path'], '', '', [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    ]);
+}
+
 
 function json_out($data, int $code=200) {
   http_response_code($code);

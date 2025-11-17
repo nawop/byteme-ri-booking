@@ -1,22 +1,17 @@
 services:
   - type: web
-    name: ri-booking
+    name: byteme-ri-booking
     env: docker
     dockerfilePath: ./Dockerfile
-    plan: starter
+    plan: free
     region: frankfurt
     autoDeploy: true
     envVars:
-      - key: DB_PATH
-        value: /data/db.sqlite
       - key: ADMIN_SECRET
-        sync: false   # set in dashboard
+        sync: false
       - key: CALLMEBOT_PHONE
         sync: false
       - key: CALLMEBOT_KEY
         sync: false
-    disks:
-      - name: dbdisk
-        mountPath: /data
-        sizeGB: 1
+      # DATABASE_URL will be set after linking the Postgres service
     healthCheckPath: /
